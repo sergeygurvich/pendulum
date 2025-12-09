@@ -1,0 +1,6 @@
+torch
+torchvision
+mlflow
+jupyterlab
+pandas
+matplotlib
