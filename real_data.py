@@ -135,11 +135,11 @@ def train_pinn(model_name, x_train, y_train, x_val, y_val, num_epoch, pinn=True)
                 y_val_pred = model(x_val)
                 val_loss = torch.mean((y_val_pred - y_val)**2).item()
 
-            # Plot on validation set timeline
+            # Plot on validation set timeline using validation t values
             plot_result(
                 i+1,
-                data_df.t,
-                data_df.theta,
+                x_val[:, 0],
+                y_val,
                 y_val_pred
             )
             os.makedirs('plots', exist_ok=True)
