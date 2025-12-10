@@ -44,7 +44,7 @@ WARMUP_EPOCHS = 5000
 
 
 # read real data from CSV
-data_df = pd.read_csv('data/clean_data/real_pendulum_data_5sec.csv')  # Ensure this CSV file
+data_df = pd.read_csv('../data/clean_data/real_pendulum_data_5sec.csv')  # Ensure this CSV file
 
 # Convert training data to tensors
 x_tensor = torch.tensor(data_df[['t','length','start_angle']].values, dtype=torch.float32)
@@ -217,7 +217,7 @@ def train_pinn(model_name, x_train, y_train, num_epoch, pinn=True):
             with torch.no_grad():
                 y_train_pred = model(x_train)
             plot_result(i+1, x_train[:, 0], y_train, y_train_pred)
-            os.makedirs('plots', exist_ok=True)
+            os.makedirs('../plots', exist_ok=True)
             file = f"plots/{model_name}_{i+1:08d}.png"
             plt.savefig(file, bbox_inches='tight', pad_inches=0.1, dpi=100)
             plt.close()
@@ -259,5 +259,5 @@ def start_training(model_name, x_all, y_all, num_epochs=1000, pinn=True):
 
 # Main entry point
 if __name__ == "__main__":
-    model_name = '7 data variations'
+    model_name = '8 data variations pinn'
     start_training(model_name, x_tensor, y_tensor, num_epochs=n_epochs, pinn=True)
