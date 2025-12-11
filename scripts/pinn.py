@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
 from PIL import Image
 from scipy.integrate import odeint
 import numpy as np
@@ -14,13 +12,16 @@ import os
 # Set random seed for reproducibility
 torch.manual_seed(123)
 
+MODEL_NAME = "pinn 1"
+N_EPOCHS = 10000
+
 # mlflow setup
-mlflow.set_tracking_uri("sqlite:///mlruns.db")
-mlflow.set_experiment("pinn_experiments_global")
+os.environ["MLFLOW_TRACKING_URI"] = "http://127.0.0.1:5000"
+mlflow.set_experiment("pinn_experiments")
 
 # Device configuration
 device='cpu'
-device = "cuda" if torch.cuda.is_available() else "cpu"
+# device = "cuda" if torch.cuda.is_available() else "cpu"
 print(device)
 
 patience = 200  # Early stopping patience
@@ -30,7 +31,7 @@ n_epochs = 20000 # Maximum number of epochs
 g = 9.81  # Gravity
 initial_state = [1.596, 0]  # Initial angle and angular velocity
 initial_state_str = str(initial_state)
-lengths = [1]  # List of pendulum lengths to simulate
+lengths = [0.19]  # List of pendulum lengths to simulate
 
 # ODE for simple pendulum
 # state: [theta, theta_dot], t: time, L: length, g: gravity
@@ -122,7 +123,7 @@ def save_gif_PIL(outfile, files, fps=10, loop=0):
 # x_train, y_train: training data
 # num_epoch: number of epochs
 # pinn: whether to use physics-informed loss
-def train_pinn(model_name, x_train, y_train, num_epoch=1000, pinn=True):
+def train_pinn(model_name, x_train, y_train, num_epoch=1000):
     # Log parameters to MLflow
     mlflow.log_param("initial_state", initial_state_str)
     mlflow.log_param("lengths", lengths)
@@ -131,7 +132,7 @@ def train_pinn(model_name, x_train, y_train, num_epoch=1000, pinn=True):
     mlflow.log_param("num_epochs_init", num_epoch)
     mlflow.log_param("device", device)
     model = FCN(2,1,32,3).to(device)
-    lr = 1e-4 if pinn else 1e-3
+    lr = 1e-4
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     mlflow.log_param("learning_rate", lr)
     x_train = x_train.to(device)
@@ -144,23 +145,22 @@ def train_pinn(model_name, x_train, y_train, num_epoch=1000, pinn=True):
         y_pred = model(x_train)
         data_loss = torch.mean((y_pred - y_train)**2)
         loss = data_loss
-        if pinn:
-            # Physics-informed loss calculation
-            physics_losses = []
-            for L_phys in lengths:
-                t_phys = torch.linspace(0, end_time, 30, device=device).view(-1,1)
-                l_phys = torch.full_like(t_phys, L_phys)
-                x_phys = torch.cat([t_phys, l_phys], dim=1).requires_grad_(True)
-                y_phys = model(x_phys)
-                grad1 = torch.autograd.grad(y_phys, x_phys, torch.ones_like(y_phys), create_graph=True)[0]
-                dy_dt = grad1[:,0:1]
-                grad2 = torch.autograd.grad(dy_dt, x_phys, torch.ones_like(dy_dt), create_graph=True)[0]
-                d2y_dt2 = grad2[:,0:1]
-                k_phys = g / x_phys[:,1:2]
-                residual = d2y_dt2 + k_phys * torch.sin(y_phys)
-                physics_losses.append(torch.mean(residual**2))
-            physics_loss = torch.mean(torch.stack(physics_losses))
-            loss = loss + 1e-4 * physics_loss
+        # Physics-informed loss calculation
+        physics_losses = []
+        for L_phys in lengths:
+            t_phys = torch.linspace(0, end_time, 30, device=device).view(-1,1)
+            l_phys = torch.full_like(t_phys, L_phys)
+            x_phys = torch.cat([t_phys, l_phys], dim=1).requires_grad_(True)
+            y_phys = model(x_phys)
+            grad1 = torch.autograd.grad(y_phys, x_phys, torch.ones_like(y_phys), create_graph=True)[0]
+            dy_dt = grad1[:,0:1]
+            grad2 = torch.autograd.grad(dy_dt, x_phys, torch.ones_like(dy_dt), create_graph=True)[0]
+            d2y_dt2 = grad2[:,0:1]
+            k_phys = g / x_phys[:,1:2]
+            residual = d2y_dt2 + k_phys * torch.sin(y_phys)
+            physics_losses.append(torch.mean(residual**2))
+        physics_loss = torch.mean(torch.stack(physics_losses))
+        loss = loss + 1e-4 * physics_loss
         loss.backward()
         optimizer.step()
         # Save plots and log metrics every 500 epochs
@@ -177,7 +177,7 @@ def train_pinn(model_name, x_train, y_train, num_epoch=1000, pinn=True):
                 y_full_pred
             )
             os.makedirs('../plots', exist_ok=True)
-            file = f"plots/{model_name}_{i+1:08d}.png"
+            file = f"../plots/{model_name}_{i+1:08d}.png"
             plt.savefig(file, bbox_inches='tight', pad_inches=0.1, dpi=100)
             plt.close()
             files.append(file)
@@ -191,18 +191,22 @@ def train_pinn(model_name, x_train, y_train, num_epoch=1000, pinn=True):
     return model, files
 
 # Wrapper to start MLflow run and train model
-def start_training(model_name, x_train, y_train, num_epochs=1000, pinn=True):
+def start_training(model_name, x_train, y_train, num_epochs=1000):
     mlflow.end_run()
     with mlflow.start_run(run_name=model_name):
-        model, files = train_pinn(model_name, x_train, y_train, num_epochs, pinn)
+        model, files = train_pinn(model_name, x_train, y_train, num_epochs)
         if files:
-            save_gif_PIL(f"{model_name}.gif", files, fps=10, loop=0)
-            mlflow.log_artifact(f"{model_name}.gif")
-        torch.save(model.state_dict(), f"{model_name}.pth")
+            save_gif_PIL(f"../plots/{model_name}.gif", files, fps=10, loop=0)
+            # Delete all .png files in ../plots directory
+            for f in files:
+                if os.path.exists(f):
+                    os.remove(f)
+
+            mlflow.log_artifact(f"../plots/{model_name}.gif")
         mlflow.pytorch.log_model(model, "models")
     mlflow.end_run()
 
 # Main entry point
 if __name__ == "__main__":
-    model_name = 'pinn_l_1met_no_data'
-    start_training(model_name, x_tensor, y_tensor, num_epochs=n_epochs, pinn=True)
+    model_name = MODEL_NAME
+    start_training(model_name, x_tensor, y_tensor, num_epochs=N_EPOCHS)
