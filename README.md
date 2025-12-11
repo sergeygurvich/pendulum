@@ -30,8 +30,9 @@
    ```bash
     mlflow server --backend-store-uri sqlite:///mlruns.db --default-artifact-root ./mlartifacts
    ```
+2. **Run any training script from `scripts` folder** 
 
-2. **Run Jupyter Lab** 
+3. **Run Jupyter Lab** 
     ```bash
     jupyter lab
    ```
