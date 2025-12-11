@@ -10,26 +10,26 @@ import os
 # Set random seed for reproducibility
 torch.manual_seed(123)
 
-MODEL_NAME = "regular nn"
+MODEL_NAME = "regular nn 2"
+N_EPOCHS = 10000
 
 # mlflow setup
-mlflow.set_tracking_uri("sqlite:///mlruns.db")
+os.environ["MLFLOW_TRACKING_URI"] = "http://127.0.0.1:5000"
 mlflow.set_experiment("nn_experiments")
 
 # Device configuration
 device='cpu'
 # device = "cuda" if torch.cuda.is_available() else "cpu"
-
 print(device)
-patience = 200  # Early stopping patience
+
+# Training parameters
 end_time = 5.0  # Simulation end time
-n_epochs = 100000 # Maximum number of epochs
 
 # Physical constants
 g = 9.81  # Gravity
 
 # read real data from CSV
-data_df = pd.read_csv('../data/clean_data/real_pendulum_data_5sec.csv')  # Ensure this CSV file
+data_df = pd.read_csv('../data/clean_data/real_pendulum_data_5sec.csv')
 
 # Convert training data to tensors
 x_tensor = torch.tensor(data_df[['t','length','start_angle']].values, dtype=torch.float32)
@@ -58,8 +58,6 @@ class FCN(nn.Module):
 # x_train_time, y_train: training data
 # y_pred: model predictions
 def plot_result(step,
-                # x_time,
-                # y_true,
                 x_train_time,
                 y_train,
                 y_pred
@@ -86,12 +84,10 @@ def save_gif_PIL(outfile, files, fps=10, loop=0):
 # num_epoch: number of epochs
 def train(model_name, x_train, y_train, num_epoch):
     # Log parameters to MLflow
-    # mlflow.log_param("initial_state", initial_state_str)
-    # mlflow.log_param("lengths", lengths)
     mlflow.log_param("end_time", end_time)
-    mlflow.log_param("patience", patience)
     mlflow.log_param("num_epochs_init", num_epoch)
     mlflow.log_param("device", device)
+
     model = FCN(3,1,32,3).to(device)
     lr = 1e-4
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -99,8 +95,6 @@ def train(model_name, x_train, y_train, num_epoch):
     x_train = x_train.to(device)
     y_train = y_train.to(device)
     files = []  # For saving plot images
-    best_loss = float('inf')
-    counter = 0
     final_epoch = 0
 
     for i in range(num_epoch):
@@ -121,7 +115,7 @@ def train(model_name, x_train, y_train, num_epoch):
                 y_pred
             )
             os.makedirs('../plots', exist_ok=True)
-            file = f"plots/{model_name}_{i+1:08d}.png"
+            file = f"../plots/{model_name}_{i+1:08d}.png"
             plt.savefig(file, bbox_inches='tight', pad_inches=0.1, dpi=100)
             plt.close()
             files.append(file)
@@ -142,13 +136,17 @@ def start_training(model_name, x_train, y_train, num_epochs):
     with mlflow.start_run(run_name=model_name):
         model, files = train(model_name, x_train, y_train, num_epochs)
         if files:
-            save_gif_PIL(f"{model_name}.gif", files, fps=10, loop=0)
-            mlflow.log_artifact(f"{model_name}.gif")
-        torch.save(model.state_dict(), f"{model_name}.pth")
+            save_gif_PIL(f"../plots/{model_name}.gif", files, fps=10, loop=0)
+            # Delete all .png files in ../plots directory
+            for f in files:
+                if os.path.exists(f):
+                    os.remove(f)
+
+            mlflow.log_artifact(f"../plots/{model_name}.gif")
         mlflow.pytorch.log_model(model, "models")
     mlflow.end_run()
 
 # Main entry point
 if __name__ == "__main__":
     model_name = MODEL_NAME
-    start_training(model_name, x_tensor, y_tensor, num_epochs=n_epochs)
+    start_training(model_name, x_tensor, y_tensor, num_epochs=N_EPOCHS)
