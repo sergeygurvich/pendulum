@@ -14,10 +14,6 @@ import os
 # Set random seed for reproducibility
 torch.manual_seed(123)
 
-# MLflow setup
-# mlflow.set_tracking_uri("sqlite:///C:\\Users\\d64105\\Desktop\\WORK\\Repos\\PINN\\mlruns.db")
-# mlflow.set_experiment("pinn_experiments_global")
-
 # mlflow setup
 mlflow.set_tracking_uri("sqlite:///mlruns.db")
 mlflow.set_experiment("pinn_experiments_global")
@@ -25,10 +21,8 @@ mlflow.set_experiment("pinn_experiments_global")
 # Device configuration
 device='cpu'
 device = "cuda" if torch.cuda.is_available() else "cpu"
-
-
-
 print(device)
+
 patience = 200  # Early stopping patience
 end_time = 5.0  # Simulation end time
 n_epochs = 20000 # Maximum number of epochs
@@ -37,15 +31,6 @@ g = 9.81  # Gravity
 initial_state = [1.596, 0]  # Initial angle and angular velocity
 initial_state_str = str(initial_state)
 lengths = [1]  # List of pendulum lengths to simulate
-
-# Small angle analytical solution for pendulum
-# w: angular frequency, x: time
-# Returns theta(t) for small angle approximation
-# def pendulum_solution(w, x):
-#     theta0 = float(initial_state[0])
-#     if isinstance(x, torch.Tensor):
-#         return theta0 * torch.cos(torch.as_tensor(w, dtype=x.dtype, device=x.device) * x)
-#     return theta0 * np.cos(w * x)
 
 # ODE for simple pendulum
 # state: [theta, theta_dot], t: time, L: length, g: gravity
@@ -152,8 +137,6 @@ def train_pinn(model_name, x_train, y_train, num_epoch=1000, pinn=True):
     x_train = x_train.to(device)
     y_train = y_train.to(device)
     files = []  # For saving plot images
-    best_loss = float('inf')
-    counter = 0
     final_epoch = 0
 
     for i in range(num_epoch):
@@ -199,17 +182,8 @@ def train_pinn(model_name, x_train, y_train, num_epoch=1000, pinn=True):
             plt.close()
             files.append(file)
             mlflow.log_metric("validation_loss", float(loss.item()), step=i+1)
-        # Early stopping logic
+
         current_loss = float(loss.item())
-        # if current_loss < best_loss:
-        #     best_loss = current_loss
-        #     counter = 0
-        # else:
-        #     counter += 1
-        #     if counter >= patience:
-        #         print(f"Early stopping at epoch {i+1}")
-        #         final_epoch = i+1
-        #         break
         if (i+1) % 1000 == 0:
             print(f"Epoch {i+1} Loss {current_loss:.6f}")
         final_epoch = i+1
