@@ -28,7 +28,7 @@
 ## Running the Project
 1. **Run MLFLOW with SQLite and Local Artifacts** 
    ```bash
-    mlflow server --backend-store-uri sqlite:///mlruns.db --default-artifact-root ./mlartifacts
+    mlflow server --backend-store-uri sqlite:///scripts/mlflow.db --default-artifact-root ./mlartifacts
    ```
 2. **Run any training script from `scripts` folder** 
 
