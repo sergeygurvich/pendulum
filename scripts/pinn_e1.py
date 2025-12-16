@@ -12,10 +12,11 @@ import os
 # Set random seed for reproducibility
 torch.manual_seed(123)
 
-MODEL_NAME = "PINN_Pure_1_50k"
-N_EPOCHS = 50000
+MODEL_NAME = "PINN_Pure_1_100k_10xIC_LOSS_1xPHY_LOSS_lr_const"
+N_EPOCHS = 100000
 # PHYSICS_LOSS_WEIGHT = 1e-4
 PHYSICS_LOSS_WEIGHT = 1
+IC_LOSS_WEIGHT = 10
 mlflow.set_experiment("experiment_generalization")
 
 # mlflow setup
@@ -113,7 +114,7 @@ def plot_result(step,
     def to_np(a): return a.detach().cpu().numpy() if isinstance(a, torch.Tensor) else a
     plt.figure(figsize=(8,4))
     plt.scatter(to_np(x_train_time), to_np(y_pred), color="tab:blue", linewidth=2)
-    plt.scatter(to_np(x_train_time), to_np(y_train), color='tab:orange', s=50, alpha=0.6, label='Training data')
+    # plt.scatter(to_np(x_train_time), to_np(y_train), color='tab:orange', s=50, alpha=0.6, label='Training data')
     for start_angle in _start_angles:
         states = odeint(simple_pendulum_eqn, [start_angle,0], t, args=(L, g))
         y = torch.tensor(states[:, 0], dtype=torch.float32).view(-1, 1)
@@ -143,7 +144,10 @@ def train(model_name, x_train, y_train, num_epoch):
     model = FCN(2,1,64,4).to(device)
     lr = 1e-3
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epoch, eta_min=1e-6)
     mlflow.log_param("learning_rate", lr)
+    mlflow.log_param("scheduler", "CosineAnnealingLR")
+    mlflow.log_param("eta_min", 1e-6)
     x_train = x_train.to(device)
     y_train = y_train.to(device)
     files = []  # For saving plot images
@@ -171,7 +175,7 @@ def train(model_name, x_train, y_train, num_epoch):
             ic_vel = (dy_dt0 - 0.0) ** 2
             ic_losses.append(ic_pos + ic_vel)
 
-            t_phys = torch.linspace(0, end_time, 100, device=device).view(-1,1)
+            t_phys = torch.linspace(0, end_time, 200, device=device).view(-1,1)
             l_phys = torch.full_like(t_phys, L_phys)
             x_phys = torch.cat([t_phys, l_phys], dim=1).requires_grad_(True)
             y_phys = model(x_phys)
@@ -185,9 +189,10 @@ def train(model_name, x_train, y_train, num_epoch):
 
         ic_loss = torch.mean(torch.stack(ic_losses))
         physics_loss = torch.mean(torch.stack(physics_losses))
-        loss = loss + PHYSICS_LOSS_WEIGHT * physics_loss + 10.0 * ic_loss
+        loss = loss + PHYSICS_LOSS_WEIGHT * physics_loss + IC_LOSS_WEIGHT * ic_loss
         loss.backward()
         optimizer.step()
+        # scheduler.step()
         # Save plots and log metrics every 500 epochs
         if (i+1) % 500 == 0:
             # Plot training predictions (use time column from x_train)
@@ -204,12 +209,15 @@ def train(model_name, x_train, y_train, num_epoch):
             plt.savefig(file, bbox_inches='tight', pad_inches=0.1, dpi=100)
             plt.close()
             files.append(file)
-            # Log training loss
-            mlflow.log_metric("train_loss_MSE", round(float(loss.item()), 3), step=i+1)
+            # Log training loss components
+            mlflow.log_metric("train_loss_total", round(float(loss.item()), 6), step=i+1)
+            mlflow.log_metric("train_loss_physics", round(float(physics_loss.item()), 6), step=i+1)
+            mlflow.log_metric("train_loss_ic", round(float(ic_loss.item()), 6), step=i+1)
+            mlflow.log_metric("learning_rate", optimizer.param_groups[0]['lr'], step=i+1)
 
         current_loss = float(loss.item())
         if (i+1) % 1000 == 0:
-            print(f"Epoch {i+1} Loss {current_loss:.6f}")
+            print(f"Epoch {i+1} Total: {current_loss:.6f} | Physics: {float(physics_loss.item()):.6f} | IC: {float(ic_loss.item()):.6f} | LR: {optimizer.param_groups[0]['lr']:.6f}")
         final_epoch = i+1
     mlflow.log_param("total_training_epochs", final_epoch)
     return model, files
