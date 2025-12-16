@@ -12,8 +12,10 @@ import os
 # Set random seed for reproducibility
 torch.manual_seed(123)
 
-MODEL_NAME = "PINN_Hybrid_1_50epochs"
-N_EPOCHS = 20000
+MODEL_NAME = "PINN_Pure_1_50k"
+N_EPOCHS = 50000
+# PHYSICS_LOSS_WEIGHT = 1e-4
+PHYSICS_LOSS_WEIGHT = 1
 mlflow.set_experiment("experiment_generalization")
 
 # mlflow setup
@@ -63,6 +65,7 @@ start_angle_test =[0.786]
 train_df = data_df[~data_df.start_angle.isin(start_angle_test)].sort_values('t')
 test_df = data_df.drop(train_df.index).sort_values('t')
 start_angles = train_df['start_angle'].unique().tolist()
+
 # start_angles = data_df['start_angle'].unique().tolist()
 
 # If test is empty (very small dataset), fall back to using full data as train
@@ -76,6 +79,8 @@ y_train_tensor = torch.tensor(train_df['theta'].values, dtype=torch.float32).vie
 
 x_test_tensor = torch.tensor(test_df[['t','start_angle']].values, dtype=torch.float32)
 y_test_tensor = torch.tensor(test_df['theta'].values, dtype=torch.float32).view(-1,1)
+
+train_df = train_df[:0]
 
 # Fully Connected Neural Network (FCN) definition
 class FCN(nn.Module):
@@ -148,10 +153,24 @@ def train(model_name, x_train, y_train, num_epoch):
         optimizer.zero_grad()
         y_pred = model(x_train)
         data_loss = torch.mean((y_pred - y_train)**2)
+        data_loss = torch.tensor(0.0, device=device)  # Ignore data loss for PINN
         loss = data_loss
         # Physics-informed loss calculation
         physics_losses = []
+        # Enforce initial condition: theta(0) = start_angle for each start_angle
+        ic_losses = []
         for L_phys in start_angles:
+            t0 = torch.zeros(1, 1, device=device, requires_grad=True)
+            l0 = torch.full_like(t0, L_phys)
+            x0 = torch.cat([t0, l0], dim=1)
+            y0 = model(x0)
+            # Position IC
+            ic_pos = (y0 - L_phys) ** 2
+            # Velocity IC
+            dy_dt0 = torch.autograd.grad(y0, t0, torch.ones_like(y0), create_graph=True)[0]
+            ic_vel = (dy_dt0 - 0.0) ** 2
+            ic_losses.append(ic_pos + ic_vel)
+
             t_phys = torch.linspace(0, end_time, 30, device=device).view(-1,1)
             l_phys = torch.full_like(t_phys, L_phys)
             x_phys = torch.cat([t_phys, l_phys], dim=1).requires_grad_(True)
@@ -163,8 +182,10 @@ def train(model_name, x_train, y_train, num_epoch):
             k_phys = g / x_phys[:,1:2]
             residual = d2y_dt2 + k_phys * torch.sin(y_phys)
             physics_losses.append(torch.mean(residual**2))
+
+        ic_loss = torch.mean(torch.stack(ic_losses))
         physics_loss = torch.mean(torch.stack(physics_losses))
-        loss = loss + 1e-4 * physics_loss
+        loss = loss + PHYSICS_LOSS_WEIGHT * physics_loss + ic_loss
         loss.backward()
         optimizer.step()
         # Save plots and log metrics every 500 epochs
