@@ -1,4 +1,6 @@
 from PIL import Image
+from scipy.integrate import odeint
+import numpy as np
 import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
@@ -10,7 +12,7 @@ import os
 # Set random seed for reproducibility
 torch.manual_seed(123)
 
-MODEL_NAME = "nn_1"
+MODEL_NAME = "PINN_Hybrid_1_50epochs"
 N_EPOCHS = 20000
 mlflow.set_experiment("experiment_generalization")
 
@@ -27,16 +29,41 @@ end_time = 5.0  # Simulation end time
 
 # Physical constants
 g = 9.81  # Gravity
+L=0.19  # Pendulum length for simulation
+t = np.linspace(0, end_time, 2500)
+x = torch.tensor(t, dtype=torch.float32).view(-1, 1)
+
+# ODE for simple pendulum
+# state: [theta, theta_dot], t: time, L: length, g: gravity
+# Returns derivatives [theta_dot, theta_ddot]
+def simple_pendulum_eqn(state, t, L, g):
+    theta, theta_dot = state
+    theta_ddot = -(g / L) * np.sin(theta)
+    return [theta_dot, theta_ddot]
+
+# Solve pendulum ODE for a given length L
+# Returns time array and angle array
+def solve_length(initial_state):
+    states = odeint(simple_pendulum_eqn, initial_state, t, args=(L, g))
+    y = states[:,0]
+    return t, y
+
+# Prepare training data
+frames = []
+num_samples = 10  # Number of training samples per length
 
 # read real data from CSV
 data_df = pd.read_csv('../data/clean_data/real_pendulum_data_5sec.csv')
 # leave only one start angle (~0.3)
 data_df = data_df[data_df['length']==0.19]
 
-# Split into train / test deterministically (80/20)
-# TRAIN_FRAC = 0.8
-train_df = data_df[~data_df.start_angle.isin([0.786])].sort_values('t')
+
+# Split into train / test
+start_angle_test =[0.786]
+train_df = data_df[~data_df.start_angle.isin(start_angle_test)].sort_values('t')
 test_df = data_df.drop(train_df.index).sort_values('t')
+start_angles = train_df['start_angle'].unique().tolist()
+# start_angles = data_df['start_angle'].unique().tolist()
 
 # If test is empty (very small dataset), fall back to using full data as train
 if test_df.shape[0] == 0:
@@ -75,12 +102,17 @@ class FCN(nn.Module):
 def plot_result(step,
                 x_train_time,
                 y_train,
-                y_pred
+                y_pred,
+                _start_angles
                 ):
     def to_np(a): return a.detach().cpu().numpy() if isinstance(a, torch.Tensor) else a
     plt.figure(figsize=(8,4))
     plt.scatter(to_np(x_train_time), to_np(y_pred), color="tab:blue", linewidth=2)
     plt.scatter(to_np(x_train_time), to_np(y_train), color='tab:orange', s=50, alpha=0.6, label='Training data')
+    for start_angle in _start_angles:
+        states = odeint(simple_pendulum_eqn, [start_angle,0], t, args=(L, g))
+        y = torch.tensor(states[:, 0], dtype=torch.float32).view(-1, 1)
+        plt.plot(x,y, label='Exact solution', color='red')
     plt.xlim(-0.05, end_time+0.05)
     plt.ylim(-1.6,1.6)
     plt.title(f"Training step: {step}")
@@ -93,7 +125,7 @@ def save_gif_PIL(outfile, files, fps=10, loop=0):
     if not imgs: return
     imgs[0].save(fp=outfile, format='GIF', append_images=imgs[1:], save_all=True, duration=int(1000/fps), loop=loop)
 
-# Train the model
+# Train the PINN model
 # model_name: name for saving artifacts
 # x_train, y_train: training data
 # num_epoch: number of epochs
@@ -117,7 +149,22 @@ def train(model_name, x_train, y_train, num_epoch):
         y_pred = model(x_train)
         data_loss = torch.mean((y_pred - y_train)**2)
         loss = data_loss
-
+        # Physics-informed loss calculation
+        physics_losses = []
+        for L_phys in start_angles:
+            t_phys = torch.linspace(0, end_time, 30, device=device).view(-1,1)
+            l_phys = torch.full_like(t_phys, L_phys)
+            x_phys = torch.cat([t_phys, l_phys], dim=1).requires_grad_(True)
+            y_phys = model(x_phys)
+            grad1 = torch.autograd.grad(y_phys, x_phys, torch.ones_like(y_phys), create_graph=True)[0]
+            dy_dt = grad1[:,0:1]
+            grad2 = torch.autograd.grad(dy_dt, x_phys, torch.ones_like(dy_dt), create_graph=True)[0]
+            d2y_dt2 = grad2[:,0:1]
+            k_phys = g / x_phys[:,1:2]
+            residual = d2y_dt2 + k_phys * torch.sin(y_phys)
+            physics_losses.append(torch.mean(residual**2))
+        physics_loss = torch.mean(torch.stack(physics_losses))
+        loss = loss + 1e-4 * physics_loss
         loss.backward()
         optimizer.step()
         # Save plots and log metrics every 500 epochs
@@ -128,7 +175,8 @@ def train(model_name, x_train, y_train, num_epoch):
                 i+1,
                 x_train[:,0].detach().cpu(),
                 y_train.detach().cpu().squeeze(),
-                y_pred.detach().cpu().squeeze()
+                y_pred.detach().cpu().squeeze(),
+                start_angles
             )
             os.makedirs('../plots', exist_ok=True)
             file = f"../plots/{model_name}_{i+1:08d}.png"
@@ -171,7 +219,8 @@ def start_training(model_name, x_train, y_train, x_test, y_test, num_epochs):
             "test_final",
             x_test[:,0].detach().cpu(),
             y_test.detach().cpu().squeeze(),
-            y_test_pred.detach().cpu().squeeze()
+            y_test_pred.detach().cpu().squeeze(),
+            start_angle_test
         )
         os.makedirs('../plots', exist_ok=True)
         test_file = f"../plots/{model_name}_test.png"
