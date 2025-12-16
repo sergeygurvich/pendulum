@@ -140,8 +140,8 @@ def train(model_name, x_train, y_train, num_epoch):
     mlflow.log_param("num_epochs_init", num_epoch)
     mlflow.log_param("device", device)
 
-    model = FCN(2,1,32,3).to(device)
-    lr = 1e-4
+    model = FCN(2,1,64,4).to(device)
+    lr = 1e-3
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     mlflow.log_param("learning_rate", lr)
     x_train = x_train.to(device)
@@ -171,7 +171,7 @@ def train(model_name, x_train, y_train, num_epoch):
             ic_vel = (dy_dt0 - 0.0) ** 2
             ic_losses.append(ic_pos + ic_vel)
 
-            t_phys = torch.linspace(0, end_time, 30, device=device).view(-1,1)
+            t_phys = torch.linspace(0, end_time, 100, device=device).view(-1,1)
             l_phys = torch.full_like(t_phys, L_phys)
             x_phys = torch.cat([t_phys, l_phys], dim=1).requires_grad_(True)
             y_phys = model(x_phys)
@@ -179,13 +179,13 @@ def train(model_name, x_train, y_train, num_epoch):
             dy_dt = grad1[:,0:1]
             grad2 = torch.autograd.grad(dy_dt, x_phys, torch.ones_like(dy_dt), create_graph=True)[0]
             d2y_dt2 = grad2[:,0:1]
-            k_phys = g / x_phys[:,1:2]
-            residual = d2y_dt2 + k_phys * torch.sin(y_phys)
+            # Use fixed L, not start_angle!
+            residual = d2y_dt2 + (g / L) * torch.sin(y_phys)
             physics_losses.append(torch.mean(residual**2))
 
         ic_loss = torch.mean(torch.stack(ic_losses))
         physics_loss = torch.mean(torch.stack(physics_losses))
-        loss = loss + PHYSICS_LOSS_WEIGHT * physics_loss + ic_loss
+        loss = loss + PHYSICS_LOSS_WEIGHT * physics_loss + 10.0 * ic_loss
         loss.backward()
         optimizer.step()
         # Save plots and log metrics every 500 epochs
