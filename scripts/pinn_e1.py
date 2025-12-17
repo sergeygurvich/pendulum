@@ -12,11 +12,12 @@ import os
 # Set random seed for reproducibility
 torch.manual_seed(123)
 
-MODEL_NAME = "PINN_Pure_2_100k_10xIC_LOSS_1xPHY_LOSS_lr_const"
+MODEL_NAME = "PINN_Hybrid_2_100k_0.1xDATA_DOSS_0.1xIC_LOSS_0.1xPHY_LOSS_lr_const"
 N_EPOCHS = 100000
 # PHYSICS_LOSS_WEIGHT = 1e-4
-PHYSICS_LOSS_WEIGHT = 1
-IC_LOSS_WEIGHT = 10
+DATA_LOSS_WEIGHT = 0.1
+PHYSICS_LOSS_WEIGHT = 0.1
+IC_LOSS_WEIGHT = 0.1
 mlflow.set_experiment("experiment_generalization")
 
 # mlflow setup
@@ -65,7 +66,7 @@ data_df = data_df[data_df['length']==0.19]
 start_angle_test =[0.786]
 train_df = data_df[~data_df.start_angle.isin(start_angle_test)].sort_values('t')
 test_df = data_df.drop(train_df.index).sort_values('t')
-start_angles = data_df['start_angle'].unique().tolist()
+start_angles = train_df['start_angle'].unique().tolist()
 
 # start_angles = data_df['start_angle'].unique().tolist()
 
@@ -114,7 +115,7 @@ def plot_result(step,
     def to_np(a): return a.detach().cpu().numpy() if isinstance(a, torch.Tensor) else a
     plt.figure(figsize=(8,4))
     plt.scatter(to_np(x_train_time), to_np(y_pred), color="tab:blue", linewidth=2)
-    # plt.scatter(to_np(x_train_time), to_np(y_train), color='tab:orange', s=50, alpha=0.6, label='Training data')
+    plt.scatter(to_np(x_train_time), to_np(y_train), color='tab:orange', s=50, alpha=0.6, label='Training data')
     for start_angle in _start_angles:
         states = odeint(simple_pendulum_eqn, [start_angle,0], t, args=(L, g))
         y = torch.tensor(states[:, 0], dtype=torch.float32).view(-1, 1)
@@ -137,6 +138,10 @@ def save_gif_PIL(outfile, files, fps=10, loop=0):
 # num_epoch: number of epochs
 def train(model_name, x_train, y_train, num_epoch):
     # Log parameters to MLflow
+    mlflow.log_param("data_loss_weight", DATA_LOSS_WEIGHT)
+    mlflow.log_param("physics_loss_weight", PHYSICS_LOSS_WEIGHT)
+    mlflow.log_param("ic_loss_weight", IC_LOSS_WEIGHT)
+
     mlflow.log_param("end_time", end_time)
     mlflow.log_param("num_epochs_init", num_epoch)
     mlflow.log_param("device", device)
@@ -157,7 +162,7 @@ def train(model_name, x_train, y_train, num_epoch):
         optimizer.zero_grad()
         y_pred = model(x_train)
         data_loss = torch.mean((y_pred - y_train)**2)
-        data_loss = torch.tensor(0.0, device=device)  # Ignore data loss for PINN
+        # data_loss = torch.tensor(0.0, device=device)  # Ignore data loss for PINN
         loss = data_loss
         # Physics-informed loss calculation
         physics_losses = []
@@ -189,7 +194,7 @@ def train(model_name, x_train, y_train, num_epoch):
 
         ic_loss = torch.mean(torch.stack(ic_losses))
         physics_loss = torch.mean(torch.stack(physics_losses))
-        loss = loss + PHYSICS_LOSS_WEIGHT * physics_loss + IC_LOSS_WEIGHT * ic_loss
+        loss = DATA_LOSS_WEIGHT * data_loss + PHYSICS_LOSS_WEIGHT * physics_loss + IC_LOSS_WEIGHT * ic_loss
         loss.backward()
         optimizer.step()
         # scheduler.step()
@@ -211,13 +216,14 @@ def train(model_name, x_train, y_train, num_epoch):
             files.append(file)
             # Log training loss components
             mlflow.log_metric("train_loss_total", round(float(loss.item()), 6), step=i+1)
+            mlflow.log_metric("train_loss_data", round(float(data_loss.item()), 6), step=i+1)
             mlflow.log_metric("train_loss_physics", round(float(physics_loss.item()), 6), step=i+1)
             mlflow.log_metric("train_loss_ic", round(float(ic_loss.item()), 6), step=i+1)
             mlflow.log_metric("learning_rate", optimizer.param_groups[0]['lr'], step=i+1)
 
         current_loss = float(loss.item())
         if (i+1) % 1000 == 0:
-            print(f"Epoch {i+1} Total: {current_loss:.6f} | Physics: {float(physics_loss.item()):.6f} | IC: {float(ic_loss.item()):.6f} | LR: {optimizer.param_groups[0]['lr']:.6f}")
+            print(f"Epoch {i+1} Total: {current_loss:.6f}| Data: {float(data_loss.item()):.6f} | Physics: {float(physics_loss.item()):.6f} | IC: {float(ic_loss.item()):.6f} | LR: {optimizer.param_groups[0]['lr']:.6f}")
         final_epoch = i+1
     mlflow.log_param("total_training_epochs", final_epoch)
     return model, files
