@@ -12,7 +12,7 @@ import os
 # Set random seed for reproducibility
 torch.manual_seed(123)
 
-MODEL_NAME = "PINN_Pure_1_100k_10xIC_LOSS_1xPHY_LOSS_lr_const"
+MODEL_NAME = "PINN_Pure_2_100k_10xIC_LOSS_1xPHY_LOSS_lr_const"
 N_EPOCHS = 100000
 # PHYSICS_LOSS_WEIGHT = 1e-4
 PHYSICS_LOSS_WEIGHT = 1
@@ -65,7 +65,7 @@ data_df = data_df[data_df['length']==0.19]
 start_angle_test =[0.786]
 train_df = data_df[~data_df.start_angle.isin(start_angle_test)].sort_values('t')
 test_df = data_df.drop(train_df.index).sort_values('t')
-start_angles = train_df['start_angle'].unique().tolist()
+start_angles = data_df['start_angle'].unique().tolist()
 
 # start_angles = data_df['start_angle'].unique().tolist()
 
@@ -122,7 +122,7 @@ def plot_result(step,
     plt.xlim(-0.05, end_time+0.05)
     plt.ylim(-1.6,1.6)
     plt.title(f"Training step: {step}")
-    plt.legend(frameon=False)
+    plt.legend(frameon=False, loc='upper right')
     plt.tight_layout()
 
 # Save a sequence of PNGs as a GIF using PIL

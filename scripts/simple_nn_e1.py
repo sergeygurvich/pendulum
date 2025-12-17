@@ -84,7 +84,7 @@ def plot_result(step,
     plt.xlim(-0.05, end_time+0.05)
     plt.ylim(-1.6,1.6)
     plt.title(f"Training step: {step}")
-    plt.legend(frameon=False)
+    plt.legend(frameon=False, loc='upper right')
     plt.tight_layout()
 
 # Save a sequence of PNGs as a GIF using PIL
