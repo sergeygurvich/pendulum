@@ -12,10 +12,10 @@ import os
 # Set random seed for reproducibility
 torch.manual_seed(123)
 
-MODEL_NAME = "PINN_Hybrid_2_100k_0.1xDATA_DOSS_0.1xIC_LOSS_0.1xPHY_LOSS_lr_const"
+MODEL_NAME = "PINN_Hybrid_5___0.09xData_0.1xPhy_0.1xIC__100k"
 N_EPOCHS = 100000
 # PHYSICS_LOSS_WEIGHT = 1e-4
-DATA_LOSS_WEIGHT = 0.1
+DATA_LOSS_WEIGHT = 0.09
 PHYSICS_LOSS_WEIGHT = 0.1
 IC_LOSS_WEIGHT = 0.1
 mlflow.set_experiment("experiment_generalization")
