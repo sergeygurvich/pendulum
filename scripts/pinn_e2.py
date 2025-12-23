@@ -12,8 +12,9 @@ import os
 # Set random seed for reproducibility
 torch.manual_seed(123)
 
-MODEL_NAME = "PINN_Hybrid_2___0.1xData_0.1xPhy_0.1xIC__100k__lr0.001"
-N_EPOCHS = 100000
+# ToDo: run the same experiment but with with no physics loss (data only) for comparison
+MODEL_NAME = "PINN_Hybrid_2.4_50p_data__0.1xData_0.1xPhy_0.1xIC__200k__lr0.001"
+N_EPOCHS = 200000
 # PHYSICS_LOSS_WEIGHT = 1e-4
 DATA_LOSS_WEIGHT = 0.1
 PHYSICS_LOSS_WEIGHT = 0.1
@@ -65,10 +66,12 @@ data_df = data_df[data_df['length']==0.19]
 # Split into train / test
 start_angle_test =[0.786]
 train_df = data_df[~data_df.start_angle.isin(start_angle_test)].sort_values('t')
-test_df = data_df.drop(train_df.index).sort_values('t')
+test_df = data_df[data_df.start_angle.isin(start_angle_test)].sort_values('t')
+# train_df = train_df[:0]
+train_df = train_df.sample(frac=0.5, random_state=123)
+# test_df = data_df.drop(train_df.index).sort_values('t')
+# start_angles = train_df['start_angle'].unique().tolist()
 start_angles = data_df['start_angle'].unique().tolist()
-
-# start_angles = data_df['start_angle'].unique().tolist()
 
 # If test is empty (very small dataset), fall back to using full data as train
 if test_df.shape[0] == 0:
@@ -151,8 +154,8 @@ def train(model_name, x_train, y_train, num_epoch):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epoch, eta_min=1e-6)
     mlflow.log_param("learning_rate", lr)
-    mlflow.log_param("scheduler", "CosineAnnealingLR")
-    mlflow.log_param("eta_min", 1e-6)
+    # mlflow.log_param("scheduler", "CosineAnnealingLR")
+    # mlflow.log_param("eta_min", 1e-6)
     x_train = x_train.to(device)
     y_train = y_train.to(device)
     files = []  # For saving plot images
@@ -219,7 +222,7 @@ def train(model_name, x_train, y_train, num_epoch):
             mlflow.log_metric("train_loss_data", round(float(data_loss.item()), 6), step=i+1)
             mlflow.log_metric("train_loss_physics", round(float(physics_loss.item()), 6), step=i+1)
             mlflow.log_metric("train_loss_ic", round(float(ic_loss.item()), 6), step=i+1)
-            mlflow.log_metric("learning_rate", optimizer.param_groups[0]['lr'], step=i+1)
+            # mlflow.log_metric("learning_rate", optimizer.param_groups[0]['lr'], step=i+1)
 
         if (i+1) %N_EPOCHS == 0:
             # # Plot training predictions (use time column from x_train)
@@ -259,6 +262,15 @@ def start_training(model_name, x_train, y_train, x_test, y_test, num_epochs):
             test_mse = torch.mean((y_test_pred - y_test)**2).item()
             test_rmse = torch.sqrt(torch.mean((y_test_pred - y_test)**2)).item()
 
+            # Additional test for test angle from training set
+            start_angle_test2 = [1.596]
+            test_df2 = data_df[data_df.start_angle.isin(start_angle_test2)].sort_values('t')
+            x_test_tensor2 = torch.tensor(test_df2[['t', 'start_angle']].values, dtype=torch.float32)
+            y_test_tensor2 = torch.tensor(test_df2['theta'].values, dtype=torch.float32).view(-1, 1)
+            x_test2 = x_test_tensor2.to(device)
+            y_test2 = y_test_tensor2.to(device)
+            y_test_pred_2 = model(x_test2)
+
         # Log and print final test metrics
         mlflow.log_metric("test_MSE", round(test_mse, 2))
         mlflow.log_metric("test_MAE", round(test_mae, 3))
@@ -275,6 +287,20 @@ def start_training(model_name, x_train, y_train, x_test, y_test, num_epochs):
         )
         os.makedirs('../plots', exist_ok=True)
         test_file = f"../plots/{model_name}_test.png"
+        plt.savefig(test_file, bbox_inches='tight', pad_inches=0.1, dpi=100)
+        plt.close()
+        mlflow.log_artifact(test_file)
+
+        # Save a final plot comparing predictions to true test values
+        plot_result(
+            "train_test_final",
+            x_test2[:,0].detach().cpu(),
+            y_test2.detach().cpu().squeeze(),
+            y_test_pred_2.detach().cpu().squeeze(),
+            start_angle_test2
+        )
+        os.makedirs('../plots', exist_ok=True)
+        test_file = f"../plots/{model_name}_test_train.png"
         plt.savefig(test_file, bbox_inches='tight', pad_inches=0.1, dpi=100)
         plt.close()
         mlflow.log_artifact(test_file)
