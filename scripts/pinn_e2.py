@@ -12,8 +12,7 @@ import os
 # Set random seed for reproducibility
 torch.manual_seed(123)
 
-# ToDo: run the same experiment but with with no physics loss (data only) for comparison
-MODEL_NAME = "PINN_Hybrid_2.4_50p_data__0.1xData_0.1xPhy_0.1xIC__200k__lr0.001"
+MODEL_NAME = "PINN_Hybrid_2.5_20p_data__0.1xData_0.1xPhy_0.1xIC__200k__lr0.001"
 N_EPOCHS = 200000
 # PHYSICS_LOSS_WEIGHT = 1e-4
 DATA_LOSS_WEIGHT = 0.1
@@ -68,7 +67,7 @@ start_angle_test =[0.786]
 train_df = data_df[~data_df.start_angle.isin(start_angle_test)].sort_values('t')
 test_df = data_df[data_df.start_angle.isin(start_angle_test)].sort_values('t')
 # train_df = train_df[:0]
-train_df = train_df.sample(frac=0.5, random_state=123)
+train_df = train_df.sample(frac=0.2, random_state=123)
 # test_df = data_df.drop(train_df.index).sort_values('t')
 # start_angles = train_df['start_angle'].unique().tolist()
 start_angles = data_df['start_angle'].unique().tolist()
